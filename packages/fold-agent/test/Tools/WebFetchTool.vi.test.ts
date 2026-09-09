@@ -51,7 +51,7 @@ const firstText = (result: unknown): string => {
 
 const fetchResult = (
 	url: string,
-	options?: { readonly format?: 'markdown' | 'text' | 'html'; readonly timeout?: number },
+	options?: { readonly format?: 'markdown' | 'text' | 'html'; readonly timeout_seconds?: number },
 ) => runHandler(handlerOf(webFetchTool())({ url, ...options }))
 
 let server: Server
@@ -202,7 +202,7 @@ it.live('rejects non-http(s) URLs before making a request', () =>
 
 it.live('times out a response that never arrives', () =>
 	Effect.gen(function* () {
-		const failure = yield* fetchResult(`${baseUrl}/slow`, { timeout: 300 }).pipe(Effect.flip)
+		const failure = yield* fetchResult(`${baseUrl}/slow`, { timeout_seconds: 0.3 }).pipe(Effect.flip)
 
 		expect(messageOf(failure)).toContain('timed out')
 	}),

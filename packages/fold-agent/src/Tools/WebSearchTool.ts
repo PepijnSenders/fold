@@ -6,7 +6,8 @@ import {
 	webSearchToolContract,
 	type FoldTool,
 } from '@humanlayer/fold-core'
-import { Effect, Predicate } from 'effect'
+import { Effect, Fiber, Predicate } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
 
 const defaultTimeoutMs = 25_000
 const maxNumResults = 20
@@ -106,8 +107,12 @@ const callMcp = (input: {
 	readonly timeoutMs: number
 }): Effect.Effect<string | undefined, { message: string }> =>
 	Effect.gen(function* () {
+		const fetch = yield* FetchHttpClient.Fetch
 		const controller = new AbortController()
-		const timer = setTimeout(() => controller.abort(), input.timeoutMs)
+		const timer = yield* Effect.sleep(input.timeoutMs).pipe(
+			Effect.andThen(Effect.sync(() => controller.abort())),
+			Effect.forkChild,
+		)
 
 		return yield* Effect.gen(function* () {
 			const response = yield* Effect.tryPromise({
@@ -150,7 +155,7 @@ const callMcp = (input: {
 				}),
 			})
 			return yield* parseMcpResponse(body)
-		}).pipe(Effect.ensuring(Effect.sync(() => clearTimeout(timer))))
+		}).pipe(Effect.ensuring(Fiber.interrupt(timer)))
 	})
 
 export const webSearchTool = (options?: WebSearchToolOptions): FoldTool =>
@@ -162,7 +167,10 @@ export const webSearchTool = (options?: WebSearchToolOptions): FoldTool =>
 				const provider = selectProvider(currentAgent.agentId, options)
 				const numResults = Math.min(params.numResults ?? 8, maxNumResults)
 				const contextMaxCharacters = Math.min(params.contextMaxCharacters ?? 10_000, maxContextCharacters)
-				const timeoutMs = options?.timeoutMs ?? defaultTimeoutMs
+				const timeoutMs =
+					params.timeout_seconds === undefined
+						? (options?.timeoutMs ?? defaultTimeoutMs)
+						: params.timeout_seconds * 1000
 
 				const result =
 					provider === 'exa'
