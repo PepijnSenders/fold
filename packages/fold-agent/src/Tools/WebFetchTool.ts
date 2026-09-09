@@ -206,7 +206,7 @@ export const webFetchTool = (): FoldTool => {
 				return yield* failWith('URL must start with http:// or https://')
 			}
 
-			const timeoutMs = Math.min(params.timeout ?? defaultTimeoutMs, maxTimeoutMs)
+			const timeoutMs = Math.min((params.timeout_seconds ?? defaultTimeoutMs / 1000) * 1000, maxTimeoutMs)
 			const document = yield* fetchDocument(params.url, timeoutMs)
 			return yield* renderDocument(params.url, document, params.format ?? 'markdown', turndown)
 		}).pipe(

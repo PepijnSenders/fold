@@ -164,8 +164,8 @@ const WebFetchParameters = Schema.Struct({
 	format: Schema.optionalKey(Schema.Literals(['markdown', 'text', 'html'])).annotate({
 		description: 'Output format. Defaults to markdown; html returns raw HTML; text strips HTML tags.',
 	}),
-	timeout: Schema.optionalKey(Schema.Number).annotate({
-		description: 'Request timeout in milliseconds. Defaults to 30000; maximum 120000.',
+	timeout_seconds: Schema.optionalKey(Schema.Number).annotate({
+		description: 'Request timeout in seconds. Defaults to 30 seconds; capped at 120 seconds.',
 	}),
 })
 
@@ -184,6 +184,10 @@ export const webFetchToolContract = {
 
 const WebSearchParameters = Schema.Struct({
 	query: Schema.String.annotate({ description: 'Search query to run against the web.' }),
+	timeout_seconds: Schema.optionalKey(Schema.Number).annotate({
+		description:
+			'Request timeout in seconds. Overrides the configured timeout; defaults to 25 seconds when unconfigured.',
+	}),
 	numResults: Schema.optionalKey(Schema.Number).annotate({
 		description: 'Number of search results to return. Defaults to 8; maximum 20.',
 	}),
