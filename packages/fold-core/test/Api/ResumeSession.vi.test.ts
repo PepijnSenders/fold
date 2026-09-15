@@ -7,15 +7,18 @@ import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem'
  * roster changes the block). An unchanged configuration writes nothing.
  */
 import { expect, it } from '@effect/vitest'
-import { Predicate, Cause, Context, Effect, Exit, Layer } from 'effect'
+import { Predicate, Cause, Context, Effect, Exit, Layer, Schema } from 'effect'
+import { Prompt } from 'effect/unstable/ai'
 
 import {
 	defineAgent,
 	EventLog,
 	eventLogSource,
 	layerInMemoryEventLog,
+	MessageId,
 	resumeSession,
 	startSession,
+	ToolCallId,
 	type EventLogService,
 } from '../../src/index'
 import { textTurn } from '../TestLayers/ScriptedLanguageModel'
@@ -72,6 +75,67 @@ it.effect('resume adopts the log: same ids, no new rows, full continuity - and n
 		expect(prompt).toContain('go')
 		expect(prompt).toContain('first answer')
 		expect(prompt).toContain('continue where we left off')
+	}).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+)
+
+it.effect('resume supplies a request-local failed result for a persisted dangling tool call', () =>
+	Effect.gen(function* () {
+		const sharedLog = yield* makeSharedLog
+		const first = yield* runFirstSession(sharedLog, 'You are the assistant.')
+		const danglingToolCallId = ToolCallId.make('tool_call_aaaaaaaaaaaaaaaaaaaaaaaa')
+
+		yield* sharedLog.append({
+			_tag: 'assistant-message',
+			agentId: first.rootAgentId,
+			parentAgentId: null,
+			toolCallId: null,
+			messageId: MessageId.make('msg_aaaaaaaaaaaaaaaaaaaaaaaa'),
+			message: yield* Schema.encodeUnknownEffect(Prompt.AssistantMessage)(
+				Prompt.assistantMessage({
+					content: [
+						Prompt.toolCallPart({
+							id: danglingToolCallId,
+							name: 'echo',
+							params: { text: 'possibly completed' },
+							providerExecuted: false,
+							options: { fold: { providerToolCallId: 'provider-dangling-call' } },
+						}),
+					],
+				}),
+			),
+			finish: null,
+		})
+
+		const resumedScripted = yield* scriptedModel(claudeActiveModel, [textTurn('recovered')])
+		const session = yield* resumeSession({
+			agent: defineAgent({ model: resumedScripted.model, systemPrompt: 'You are the assistant.' }),
+			log: eventLogSource(Effect.succeed(sharedLog)),
+		})
+
+		const finished = yield* session.send('continue')
+		expect(finished.resultText).toBe('recovered')
+
+		const prompt = (yield* resumedScripted.scripted.prompts)[0]
+		if (prompt === undefined) throw new Error('expected a resumed provider prompt')
+		const toolResult = prompt.content
+			.flatMap((message) => (message.role === 'tool' ? message.content : []))
+			.find((part) => part.type === 'tool-result')
+		if (toolResult?.type !== 'tool-result') throw new Error('expected a synthetic tool result')
+
+		expect(toolResult).toMatchObject({
+			id: 'provider-dangling-call',
+			name: 'echo',
+			isFailure: true,
+			providerExecuted: false,
+			result: '<system-information>No result was recorded for this tool call. The reason is unknown. The tool may have completed; check the current state before retrying.</system-information>',
+		})
+
+		const durableEntries = yield* session.entries
+		expect(
+			durableEntries.some(
+				(entry) => Predicate.isTagged(entry, 'tool-result') && entry.toolCallId === danglingToolCallId,
+			),
+		).toBe(false)
 	}).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
 )
 

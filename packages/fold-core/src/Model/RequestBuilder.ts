@@ -8,10 +8,10 @@
  * metadata into history. The assistant tool-call params stay exactly as decoded from the persisted
  * assistant message, keeping already-sent prompt bytes stable across turns.
  */
-import { Effect, Encoding, Match, Option, Schema } from 'effect'
+import { Effect, Encoding, Match, Option, Predicate, Schema } from 'effect'
 import { Prompt } from 'effect/unstable/ai'
 
-import type { ProjectedMessage } from '../Projection/Projection'
+import type { ProjectedMessage, ProjectedToolResult } from '../Projection/Projection'
 import { ToolResultOutput } from '../Tools/ToolResultContent'
 
 const anthropicEphemeralCacheControl = { type: 'ephemeral' } as const
@@ -36,6 +36,9 @@ const decodeAssistantMessage = Schema.decodeUnknownEffect(Prompt.AssistantMessag
 const decodeToolMessage = Schema.decodeUnknownEffect(Prompt.ToolMessage)
 const decodeFoldPartOptions = Schema.decodeUnknownOption(Schema.Struct({ [providerToolCallIdKey]: Schema.String }))
 const decodeToolResultOutput = Schema.decodeUnknownOption(ToolResultOutput)
+
+const missingToolResult =
+	'<system-information>No result was recorded for this tool call. The reason is unknown. The tool may have completed; check the current state before retrying.</system-information>'
 
 const decodeErrorFor = (projected: ProjectedMessage) => (cause: unknown) =>
 	new PromptDecodeError({
@@ -84,6 +87,78 @@ const restoreToolResultIds = (
 			return Prompt.toolResultPart({ ...part, id: providerId })
 		}),
 		options: message.options,
+	})
+
+type DecodedProjectedToolResult = {
+	readonly projected: ProjectedToolResult
+	readonly message: Prompt.ToolMessage
+}
+
+const unresolvedToolCallsFromAssistantMessage = (
+	message: Prompt.AssistantMessage,
+): ReadonlyArray<Prompt.ToolCallPart> =>
+	message.content.filter(
+		(part): part is Prompt.ToolCallPart => part.type === 'tool-call' && part.providerExecuted !== true,
+	)
+
+const toolResultExactlyMatchesCall = (
+	call: Prompt.ToolCallPart,
+	candidate: DecodedProjectedToolResult | undefined,
+): candidate is DecodedProjectedToolResult => {
+	if (
+		candidate === undefined ||
+		candidate.projected.toolCallId !== call.id ||
+		candidate.message.content.length !== 1
+	) {
+		return false
+	}
+
+	const part = candidate.message.content[0]
+	return part?.type === 'tool-result' && part.id === call.id
+}
+
+const indexToolResultsByRelatedCallId = (
+	results: ReadonlyArray<DecodedProjectedToolResult>,
+): ReadonlyMap<string, ReadonlyArray<DecodedProjectedToolResult>> => {
+	const indexed = new Map<string, Array<DecodedProjectedToolResult>>()
+	for (const result of results) {
+		const relatedIds = new Set<string>([result.projected.toolCallId])
+		for (const part of result.message.content) {
+			if (part.type === 'tool-result') relatedIds.add(part.id)
+		}
+
+		for (const id of relatedIds) {
+			const related = indexed.get(id)
+			if (related === undefined) indexed.set(id, [result])
+			else related.push(result)
+		}
+	}
+
+	return indexed
+}
+
+const uniqueToolResultForCall = (
+	call: Prompt.ToolCallPart,
+	resultsByRelatedCallId: ReadonlyMap<string, ReadonlyArray<DecodedProjectedToolResult>>,
+): DecodedProjectedToolResult | null => {
+	const related = resultsByRelatedCallId.get(call.id) ?? []
+	if (related.length !== 1) return null
+
+	const candidate = related[0]
+	return toolResultExactlyMatchesCall(call, candidate) ? candidate : null
+}
+
+const syntheticMissingToolResult = (call: Prompt.ToolCallPart): Prompt.ToolMessage =>
+	Prompt.toolMessage({
+		content: [
+			Prompt.toolResultPart({
+				id: call.id,
+				name: call.name,
+				result: missingToolResult,
+				isFailure: true,
+				providerExecuted: false,
+			}),
+		],
 	})
 
 /** Render a compaction summary as the user-visible stand-in for the history it replaced. */
@@ -188,7 +263,54 @@ export const buildPrompt = (
 		const providerIdsByFoldId = new Map<string, string>()
 		const promptMessages: Array<Prompt.Message> = []
 
-		for (const projected of messages) {
+		let index = 0
+		while (index < messages.length) {
+			const projected = messages[index]
+			if (projected === undefined) break
+			index += 1
+
+			if (Predicate.isTagged(projected, 'assistant-message')) {
+				const assistant = yield* decodeAssistantMessage(projected.message).pipe(
+					Effect.mapError(decodeErrorFor(projected)),
+				)
+				const toolCalls = unresolvedToolCallsFromAssistantMessage(assistant)
+				promptMessages.push(restoreAssistantToolCallIds(assistant, providerIdsByFoldId))
+
+				if (toolCalls.length === 0) continue
+
+				const results: Array<DecodedProjectedToolResult> = []
+				while (true) {
+					const result = messages[index]
+					if (!Predicate.isTagged(result, 'tool-result')) break
+					index += 1
+
+					results.push({
+						projected: result,
+						message: yield* decodeToolMessage(result.message).pipe(Effect.mapError(decodeErrorFor(result))),
+					})
+				}
+
+				const batchIsComplete =
+					results.length === toolCalls.length &&
+					toolCalls.every((call, callIndex) => toolResultExactlyMatchesCall(call, results[callIndex]))
+				const resultsByRelatedCallId = batchIsComplete ? null : indexToolResultsByRelatedCallId(results)
+
+				for (const [callIndex, call] of toolCalls.entries()) {
+					const persistedResult =
+						resultsByRelatedCallId === null
+							? (results[callIndex] ?? null)
+							: uniqueToolResultForCall(call, resultsByRelatedCallId)
+					const result = persistedResult?.message ?? syntheticMissingToolResult(call)
+					promptMessages.push(
+						yield* prepareToolMessage(restoreToolResultIds(result, providerIdsByFoldId)).pipe(
+							Effect.mapError(decodeErrorFor(persistedResult?.projected ?? projected)),
+						),
+					)
+				}
+
+				continue
+			}
+
 			yield* Match.valueTags(projected, {
 				'system-message': (message) =>
 					Effect.gen(function* () {
@@ -203,24 +325,8 @@ export const buildPrompt = (
 						Effect.mapError(decodeErrorFor(message)),
 						Effect.tap((decoded) => Effect.sync(() => promptMessages.push(decoded))),
 					),
-				'assistant-message': (message) =>
-					decodeAssistantMessage(message.message).pipe(
-						Effect.mapError(decodeErrorFor(message)),
-						Effect.tap((decoded) =>
-							Effect.sync(() =>
-								promptMessages.push(restoreAssistantToolCallIds(decoded, providerIdsByFoldId)),
-							),
-						),
-					),
 				'tool-result': (result) =>
-					decodeToolMessage(result.message).pipe(
-						Effect.mapError(decodeErrorFor(result)),
-						Effect.flatMap((decoded) =>
-							prepareToolMessage(restoreToolResultIds(decoded, providerIdsByFoldId)),
-						),
-						Effect.mapError(decodeErrorFor(result)),
-						Effect.tap((message) => Effect.sync(() => promptMessages.push(message))),
-					),
+					decodeToolMessage(result.message).pipe(Effect.mapError(decodeErrorFor(result)), Effect.asVoid),
 				'compaction-summary': (summary) =>
 					Effect.sync(() => {
 						promptMessages.push(
