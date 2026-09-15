@@ -53,6 +53,7 @@ const projectedToolResult = (
 	innerId: ToolCallId,
 	result: unknown,
 	sourceSeq = 2,
+	isFailure = false,
 ): Extract<ProjectedMessage, { readonly _tag: 'tool-result' }> => ({
 	_tag: 'tool-result',
 	sourceSeq,
@@ -60,7 +61,7 @@ const projectedToolResult = (
 	toolCallId: outerId,
 	message: {
 		role: 'tool',
-		content: [{ type: 'tool-result', id: innerId, name: 'echo', result, isFailure: false }],
+		content: [{ type: 'tool-result', id: innerId, name: 'echo', result, isFailure }],
 	},
 })
 
@@ -197,6 +198,40 @@ it.effect('keeps completed results and synthesizes only missing results in a par
 	}),
 )
 
+it.effect('leaves a complete multi-call batch unchanged', () =>
+	Effect.gen(function* () {
+		const prompt = yield* buildPrompt([
+			projectedAssistant([
+				{ id: toolCallId, providerId: 'provider-call-1', name: 'first' },
+				{ id: secondToolCallId, providerId: 'provider-call-2', name: 'second' },
+			]),
+			projectedToolResult(toolCallId, toolCallId, { value: 'first completed' }, 2),
+			projectedToolResult(secondToolCallId, secondToolCallId, { value: 'second completed' }, 3),
+		])
+
+		expect(toolResultsFrom(prompt)).toMatchObject([
+			{ id: 'provider-call-1', result: { value: 'first completed' }, isFailure: false },
+			{ id: 'provider-call-2', result: { value: 'second completed' }, isFailure: false },
+		])
+		expect(JSON.stringify(prompt.content)).not.toContain(missingToolResult)
+	}),
+)
+
+it.effect('preserves a valid failed tool result without replacing it', () =>
+	Effect.gen(function* () {
+		const persistedFailure = '<system-information>Tool "echo" failed unexpectedly: boom</system-information>'
+		const prompt = yield* buildPrompt([
+			projectedAssistant([{ id: toolCallId, providerId: 'provider-call-1', name: 'echo' }]),
+			projectedToolResult(toolCallId, toolCallId, persistedFailure, 2, true),
+		])
+
+		expect(toolResultsFrom(prompt)).toMatchObject([
+			{ id: 'provider-call-1', result: persistedFailure, isFailure: true },
+		])
+		expect(JSON.stringify(prompt.content)).not.toContain(missingToolResult)
+	}),
+)
+
 it.effect('replaces duplicate results with one synthetic failure', () =>
 	Effect.gen(function* () {
 		const prompt = yield* buildPrompt([
@@ -286,6 +321,29 @@ it.effect('synthesizes only local results in a mixed local and provider-executed
 		expect(toolResultsFrom(prompt)).toMatchObject([
 			{ id: 'provider-call-1', name: 'echo', result: missingToolResult, isFailure: true },
 		])
+	}),
+)
+
+it.effect('leaves a completed local result unchanged in a mixed provider-executed batch', () =>
+	Effect.gen(function* () {
+		const completedResult = { value: 'completed locally' }
+		const prompt = yield* buildPrompt([
+			projectedAssistant([
+				{ id: toolCallId, providerId: 'provider-call-1', name: 'echo' },
+				{
+					id: secondToolCallId,
+					providerId: 'provider-call-2',
+					name: 'web_search',
+					providerExecuted: true,
+				},
+			]),
+			projectedToolResult(toolCallId, toolCallId, completedResult),
+		])
+
+		expect(toolResultsFrom(prompt)).toMatchObject([
+			{ id: 'provider-call-1', name: 'echo', result: completedResult, isFailure: false },
+		])
+		expect(JSON.stringify(prompt.content)).not.toContain(missingToolResult)
 	}),
 )
 
