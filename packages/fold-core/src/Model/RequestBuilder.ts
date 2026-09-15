@@ -101,28 +101,51 @@ const unresolvedToolCallsFromAssistantMessage = (
 		(part): part is Prompt.ToolCallPart => part.type === 'tool-call' && part.providerExecuted !== true,
 	)
 
-const toolResultIsTheUniqueMatchForCall = (
+const toolResultExactlyMatchesCall = (
 	call: Prompt.ToolCallPart,
-	results: ReadonlyArray<DecodedProjectedToolResult>,
-): DecodedProjectedToolResult | null => {
-	const related = results.filter(
-		({ projected, message }) =>
-			projected.toolCallId === call.id ||
-			message.content.some((part) => part.type === 'tool-result' && part.id === call.id),
-	)
-	if (related.length !== 1) return null
-
-	const candidate = related[0]
+	candidate: DecodedProjectedToolResult | undefined,
+): candidate is DecodedProjectedToolResult => {
 	if (
 		candidate === undefined ||
 		candidate.projected.toolCallId !== call.id ||
 		candidate.message.content.length !== 1
 	) {
-		return null
+		return false
 	}
 
 	const part = candidate.message.content[0]
-	return part?.type === 'tool-result' && part.id === call.id ? candidate : null
+	return part?.type === 'tool-result' && part.id === call.id
+}
+
+const indexToolResultsByRelatedCallId = (
+	results: ReadonlyArray<DecodedProjectedToolResult>,
+): ReadonlyMap<string, ReadonlyArray<DecodedProjectedToolResult>> => {
+	const indexed = new Map<string, Array<DecodedProjectedToolResult>>()
+	for (const result of results) {
+		const relatedIds = new Set<string>([result.projected.toolCallId])
+		for (const part of result.message.content) {
+			if (part.type === 'tool-result') relatedIds.add(part.id)
+		}
+
+		for (const id of relatedIds) {
+			const related = indexed.get(id)
+			if (related === undefined) indexed.set(id, [result])
+			else related.push(result)
+		}
+	}
+
+	return indexed
+}
+
+const uniqueToolResultForCall = (
+	call: Prompt.ToolCallPart,
+	resultsByRelatedCallId: ReadonlyMap<string, ReadonlyArray<DecodedProjectedToolResult>>,
+): DecodedProjectedToolResult | null => {
+	const related = resultsByRelatedCallId.get(call.id) ?? []
+	if (related.length !== 1) return null
+
+	const candidate = related[0]
+	return toolResultExactlyMatchesCall(call, candidate) ? candidate : null
 }
 
 const syntheticMissingToolResult = (call: Prompt.ToolCallPart): Prompt.ToolMessage =>
@@ -267,8 +290,16 @@ export const buildPrompt = (
 					})
 				}
 
-				for (const call of toolCalls) {
-					const persistedResult = toolResultIsTheUniqueMatchForCall(call, results)
+				const batchIsComplete =
+					results.length === toolCalls.length &&
+					toolCalls.every((call, callIndex) => toolResultExactlyMatchesCall(call, results[callIndex]))
+				const resultsByRelatedCallId = batchIsComplete ? null : indexToolResultsByRelatedCallId(results)
+
+				for (const [callIndex, call] of toolCalls.entries()) {
+					const persistedResult =
+						resultsByRelatedCallId === null
+							? (results[callIndex] ?? null)
+							: uniqueToolResultForCall(call, resultsByRelatedCallId)
 					const result = persistedResult?.message ?? syntheticMissingToolResult(call)
 					promptMessages.push(
 						yield* prepareToolMessage(restoreToolResultIds(result, providerIdsByFoldId)).pipe(

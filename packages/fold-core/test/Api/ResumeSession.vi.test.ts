@@ -90,7 +90,7 @@ it.effect('resume supplies a request-local failed result for a persisted danglin
 			parentAgentId: null,
 			toolCallId: null,
 			messageId: MessageId.make('msg_aaaaaaaaaaaaaaaaaaaaaaaa'),
-			message: Schema.encodeUnknownSync(Prompt.AssistantMessage)(
+			message: yield* Schema.encodeUnknownEffect(Prompt.AssistantMessage)(
 				Prompt.assistantMessage({
 					content: [
 						Prompt.toolCallPart({
