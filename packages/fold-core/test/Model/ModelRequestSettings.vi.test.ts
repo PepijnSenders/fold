@@ -41,7 +41,8 @@ const openAiSummaryModel: ActiveModel = {
 	modelId: 'gpt-5.6-sol',
 	role: null,
 	requestedReasoningLevel: 'medium',
-	reasoning: OpenAiReasoningWithEffort.make({ effort: 'medium', summary: 'auto' }),
+	reasoning: OpenAiReasoningWithEffort.make({ effort: 'medium' }),
+	reasoningSummary: 'auto',
 }
 
 const openAiDisabledSummaryModel: ActiveModel = {
@@ -50,7 +51,8 @@ const openAiDisabledSummaryModel: ActiveModel = {
 	modelId: 'gpt-5.6-sol',
 	role: null,
 	requestedReasoningLevel: 'off',
-	reasoning: OpenAiReasoningDisabled.make({ summary: 'auto' }),
+	reasoning: OpenAiReasoningDisabled.make({}),
+	reasoningSummary: 'auto',
 }
 
 const codexModel: ActiveModel = {
@@ -102,9 +104,6 @@ it('resolves reasoning levels onto the OpenAI effort scale with off disabled and
 	expect(resolveOpenAiReasoning('off')).toEqual({ _tag: 'disabled' })
 	expect(resolveOpenAiReasoning('low')).toEqual({ _tag: 'effort', effort: 'low' })
 	expect(resolveOpenAiReasoning('max')).toEqual({ _tag: 'effort', effort: 'max' })
-	expect(resolveOpenAiReasoning('medium', 'detailed')).toEqual(
-		OpenAiReasoningWithEffort.make({ effort: 'medium', summary: 'detailed' }),
-	)
 	expect(resolveCodexReasoning('medium')).toEqual({ _tag: 'effort', effort: 'medium', summary: 'auto' })
 	expect(resolveCodexReasoning('max')).toEqual({ _tag: 'effort', effort: 'max', summary: 'auto' })
 	expect(resolveCodexReasoning('off')).toEqual({ _tag: 'disabled' })

@@ -100,12 +100,9 @@ export const OpenAiReasoningSummary = Schema.Literals(['auto', 'concise', 'detai
 })
 export type OpenAiReasoningSummary = typeof OpenAiReasoningSummary.Type
 
-export const OpenAiReasoningDisabled = Schema.TaggedStruct('disabled', {
-	summary: Schema.optional(OpenAiReasoningSummary),
-})
+export const OpenAiReasoningDisabled = Schema.TaggedStruct('disabled', {})
 export const OpenAiReasoningWithEffort = Schema.TaggedStruct('effort', {
 	effort: OpenAiReasoningEffort,
-	summary: Schema.optional(OpenAiReasoningSummary),
 })
 
 /** OpenAI-compatible reasoning settings after catalog validation/mapping. */
@@ -148,6 +145,7 @@ export const OpenAiCompatibleActiveModel = Schema.Struct({
 	role: Schema.NullOr(ModelRole),
 	requestedReasoningLevel: ReasoningLevel,
 	reasoning: OpenAiReasoningSetting,
+	reasoningSummary: Schema.optional(OpenAiReasoningSummary),
 }).annotate({ identifier: 'OpenAiCompatibleActiveModel' })
 export type OpenAiCompatibleActiveModel = typeof OpenAiCompatibleActiveModel.Type
 

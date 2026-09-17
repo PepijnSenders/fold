@@ -18,9 +18,9 @@ it('keeps custom OpenAI authentication and reasoning summary settings in the mod
 		model.activeModel.reasoning,
 		OpenAiReasoningWithEffort.make({
 			effort: 'medium',
-			summary: 'auto',
 		}),
 	)
+	assert.strictEqual(model.activeModel.reasoningSummary, 'auto')
 	assert.isTrue(Predicate.isTagged(model.provider, 'openai-compatible'))
 	if (!Predicate.isTagged(model.provider, 'openai-compatible')) return
 	assert.strictEqual(Redacted.value(model.provider.apiKey), 'bedrock-secret')
@@ -37,6 +37,7 @@ it('omits the summary and uses bearer authentication defaults when they are not 
 
 	if (model.activeModel.providerKind !== 'openai-compatible') assert.fail('expected an OpenAI-compatible model')
 	assert.deepStrictEqual(model.activeModel.reasoning, OpenAiReasoningWithEffort.make({ effort: 'medium' }))
+	assert.isUndefined(model.activeModel.reasoningSummary)
 	assert.isTrue(Predicate.isTagged(model.provider, 'openai-compatible'))
 	if (!Predicate.isTagged(model.provider, 'openai-compatible')) return
 	assert.isNull(model.provider.apiKeyHeader)

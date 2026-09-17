@@ -57,6 +57,11 @@ export interface Service {
   readonly client: HttpClient.HttpClient
 
   /**
+   * The raw API key header that must be removed from retained request metadata.
+   */
+  readonly apiKeyHeader?: string | undefined
+
+  /**
    * Create a response using the OpenAI responses endpoint.
    */
   readonly createResponse: (
@@ -163,13 +168,28 @@ const RedactedOpenAiHeaders = {
   OpenAiProject: "OpenAI-Project"
 }
 
+const redactedHeaderNames = (apiKeyHeader?: string): ReadonlyArray<string> => {
+  const names = Object.values(RedactedOpenAiHeaders)
+  if (apiKeyHeader === undefined) return names
+  return Array.append(names, apiKeyHeader)
+}
+
 const withRedactedHeaders = (apiKeyHeader?: string) => Effect.updateService(
   Headers.CurrentRedactedNames,
-  Array.appendAll([
-    ...Object.values(RedactedOpenAiHeaders),
-    ...(apiKeyHeader === undefined ? [] : [apiKeyHeader])
-  ])
+  Array.appendAll(redactedHeaderNames(apiKeyHeader))
 )
+
+const authenticateRequest = (options: Options) => {
+  if (options.apiKey === undefined) return identity
+
+  const apiKey = Redacted.value(options.apiKey)
+  if (options.apiKeyHeader === undefined) return HttpClientRequest.bearerToken(apiKey)
+
+  return Function.flow(
+    HttpClientRequest.removeHeader("authorization"),
+    HttpClientRequest.setHeader(options.apiKeyHeader, apiKey)
+  )
+}
 
 /**
  * Creates an OpenAI client service with the given options.
@@ -183,7 +203,8 @@ const withRedactedHeaders = (apiKeyHeader?: string) => Effect.updateService(
  * The returned service uses the current `HttpClient`, prepends `apiUrl` or
  * `https://api.openai.com/v1`, adds the bearer token and optional OpenAI
  * organization/project headers, accepts JSON responses, filters for successful
- * HTTP statuses, and applies `transformClient` when provided.
+ * HTTP statuses, and applies `transformClient` when provided. Authentication uses
+ * a bearer token unless `apiKeyHeader` selects a raw API key header instead.
  *
  * **Gotchas**
  *
@@ -206,11 +227,7 @@ export const make = Effect.fnUntraced(
     const httpClient = baseClient.pipe(
       HttpClient.mapRequest(Function.flow(
         HttpClientRequest.prependUrl(apiUrl),
-        options.apiKey
-          ? options.apiKeyHeader === undefined
-            ? HttpClientRequest.bearerToken(Redacted.value(options.apiKey))
-            : HttpClientRequest.setHeader(options.apiKeyHeader, Redacted.value(options.apiKey))
-          : identity,
+        authenticateRequest(options),
         options.organizationId
           ? HttpClientRequest.setHeader(
             RedactedOpenAiHeaders.OpenAiOrganization,
@@ -298,7 +315,9 @@ export const make = Effect.fnUntraced(
     const createResponseStream: Service["createResponseStream"] = (payload) =>
       Effect.contextWith((services) => {
         const socket = Context.getOrUndefined(services, OpenAiSocket)
-        if (socket) return socket.createResponseStream(payload)
+        if (socket) {
+          return socket.createResponseStream(payload).pipe(withRedactedHeaders(options.apiKeyHeader))
+        }
         return resolveHttpClient.pipe(
           Effect.flatMap((client) =>
             client.execute(HttpClientRequest.post("/responses", {
@@ -337,6 +356,7 @@ export const make = Effect.fnUntraced(
 
     return OpenAiClient.of({
       client: httpClient,
+      apiKeyHeader: options.apiKeyHeader,
       createResponse,
       createResponseStream,
       createEmbedding
@@ -525,6 +545,10 @@ const makeSocket = Effect.gen(function*() {
     acquire: Effect.gen(function*() {
       const scope = yield* Effect.scope
       const request = yield* makeRequest
+      let errorHeaders = request.headers
+      if (client.apiKeyHeader !== undefined) {
+        errorHeaders = Headers.remove(errorHeaders, client.apiKeyHeader)
+      }
       const socket = yield* Socket.makeWebSocket(request.url.replace(/^http/, "ws")).pipe(
         Effect.provideService(Socket.WebSocketConstructor, (url) =>
           makeWebSocket(url, {
@@ -555,7 +579,7 @@ const makeSocket = Effect.gen(function*() {
                   url: request.url,
                   urlParams: [],
                   hash: undefined,
-                  headers: request.headers
+                  headers: errorHeaders
                 },
                 description: "Failed to send message over WebSocket"
               })
@@ -590,7 +614,7 @@ const makeSocket = Effect.gen(function*() {
                       url: request.url,
                       urlParams: [],
                       hash: undefined,
-                      headers: request.headers
+                    headers: errorHeaders
                     }
                   }
                 })
@@ -611,7 +635,7 @@ const makeSocket = Effect.gen(function*() {
                 url: request.url,
                 urlParams: [],
                 hash: undefined,
-                headers: request.headers
+                headers: errorHeaders
               },
               description: error.message
             })

@@ -89,7 +89,8 @@ export const openaiModel = (options: ProviderModelOptions): FoldModel => {
 			modelId: options.model,
 			role: null,
 			requestedReasoningLevel: level,
-			reasoning: resolveOpenAiReasoning(level, options.reasoningSummary),
+			reasoning: resolveOpenAiReasoning(level),
+			reasoningSummary: options.reasoningSummary,
 		},
 		provider: FoldModelProvider['openai-compatible']({
 			apiKey: redact(options.apiKey),
