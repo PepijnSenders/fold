@@ -108,7 +108,6 @@ export const OpenAiReasoningWithEffort = Schema.TaggedStruct('effort', {
 /** OpenAI-compatible reasoning settings after catalog validation/mapping. */
 export const OpenAiReasoningSetting = Schema.Union([OpenAiReasoningDisabled, OpenAiReasoningWithEffort]).annotate({
 	identifier: 'OpenAiReasoningSetting',
-	discriminator: '_tag',
 })
 export type OpenAiReasoningSetting = typeof OpenAiReasoningSetting.Type
 
