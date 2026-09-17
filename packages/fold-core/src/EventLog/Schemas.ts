@@ -94,11 +94,25 @@ export const OpenAiReasoningEffort = Schema.Literals([
 })
 export type OpenAiReasoningEffort = typeof OpenAiReasoningEffort.Type
 
+/** Optional reasoning summary requested from an OpenAI-compatible Responses API. */
+export const OpenAiReasoningSummary = Schema.Literals(['auto', 'concise', 'detailed']).annotate({
+	identifier: 'OpenAiReasoningSummary',
+})
+export type OpenAiReasoningSummary = typeof OpenAiReasoningSummary.Type
+
+export const OpenAiReasoningDisabled = Schema.TaggedStruct('disabled', {
+	summary: Schema.optional(OpenAiReasoningSummary),
+})
+export const OpenAiReasoningWithEffort = Schema.TaggedStruct('effort', {
+	effort: OpenAiReasoningEffort,
+	summary: Schema.optional(OpenAiReasoningSummary),
+})
+
 /** OpenAI-compatible reasoning settings after catalog validation/mapping. */
-export const OpenAiReasoningSetting = Schema.Union([
-	Schema.TaggedStruct('disabled', {}),
-	Schema.TaggedStruct('effort', { effort: OpenAiReasoningEffort }),
-]).annotate({ identifier: 'OpenAiReasoningSetting', discriminator: '_tag' })
+export const OpenAiReasoningSetting = Schema.Union([OpenAiReasoningDisabled, OpenAiReasoningWithEffort]).annotate({
+	identifier: 'OpenAiReasoningSetting',
+	discriminator: '_tag',
+})
 export type OpenAiReasoningSetting = typeof OpenAiReasoningSetting.Type
 
 /** Codex reasoning settings after catalog validation/mapping. */

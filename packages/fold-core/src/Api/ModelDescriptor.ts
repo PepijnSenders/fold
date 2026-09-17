@@ -8,7 +8,7 @@ import { Data, Redacted } from 'effect'
 import type { Effect, Scope } from 'effect'
 import type { LanguageModel } from 'effect/unstable/ai'
 
-import type { ActiveModel, ReasoningLevel } from '../EventLog/Schemas'
+import type { ActiveModel, OpenAiReasoningSummary, ReasoningLevel } from '../EventLog/Schemas'
 import { resolveAnthropicThinking, resolveOpenAiReasoning } from '../Model/ModelRequestSettings'
 
 /**
@@ -20,6 +20,7 @@ export type FoldModelProvider =
 	| {
 			readonly _tag: 'openai-compatible'
 			readonly apiKey: Redacted.Redacted<string>
+			readonly apiKeyHeader?: string | null
 			readonly baseUrl: string | null
 	  }
 	| {
@@ -65,6 +66,10 @@ type ProviderModelOptionsBase = {
 export type ProviderModelOptions = ProviderModelOptionsBase & {
 	/** Provider model id, for example `gpt-5.6-luna`. */
 	readonly model: string
+	/** Replace bearer authentication with a raw API key in this header. */
+	readonly apiKeyHeader?: string
+	/** Request a reasoning summary. Omitted by default for provider compatibility. */
+	readonly reasoningSummary?: OpenAiReasoningSummary
 }
 
 /** Options for {@link anthropicModel}: the model id defaults to {@link DEFAULT_ANTHROPIC_MODEL_ID}. */
@@ -84,10 +89,11 @@ export const openaiModel = (options: ProviderModelOptions): FoldModel => {
 			modelId: options.model,
 			role: null,
 			requestedReasoningLevel: level,
-			reasoning: resolveOpenAiReasoning(level),
+			reasoning: resolveOpenAiReasoning(level, options.reasoningSummary),
 		},
 		provider: FoldModelProvider['openai-compatible']({
 			apiKey: redact(options.apiKey),
+			apiKeyHeader: options.apiKeyHeader ?? null,
 			baseUrl: options.baseUrl ?? null,
 		}),
 	}

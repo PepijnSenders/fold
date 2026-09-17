@@ -127,6 +127,11 @@ export type Options = {
   readonly apiKey?: Redacted.Redacted<string> | undefined
 
   /**
+   * Send the API key as a raw value in this header instead of using bearer authentication.
+   */
+  readonly apiKeyHeader?: string | undefined
+
+  /**
    * The base URL for the OpenAI API.
    *
    * @default "https://api.openai.com/v1"
@@ -158,9 +163,12 @@ const RedactedOpenAiHeaders = {
   OpenAiProject: "OpenAI-Project"
 }
 
-const withRedactedHeaders = Effect.updateService(
+const withRedactedHeaders = (apiKeyHeader?: string) => Effect.updateService(
   Headers.CurrentRedactedNames,
-  Array.appendAll(Object.values(RedactedOpenAiHeaders))
+  Array.appendAll([
+    ...Object.values(RedactedOpenAiHeaders),
+    ...(apiKeyHeader === undefined ? [] : [apiKeyHeader])
+  ])
 )
 
 /**
@@ -199,7 +207,9 @@ export const make = Effect.fnUntraced(
       HttpClient.mapRequest(Function.flow(
         HttpClientRequest.prependUrl(apiUrl),
         options.apiKey
-          ? HttpClientRequest.bearerToken(Redacted.value(options.apiKey))
+          ? options.apiKeyHeader === undefined
+            ? HttpClientRequest.bearerToken(Redacted.value(options.apiKey))
+            : HttpClientRequest.setHeader(options.apiKeyHeader, Redacted.value(options.apiKey))
           : identity,
         options.organizationId
           ? HttpClientRequest.setHeader(
@@ -256,7 +266,7 @@ export const make = Effect.fnUntraced(
             })
           )
         ),
-        withRedactedHeaders
+        withRedactedHeaders(options.apiKeyHeader)
       )
 
     const buildResponseStream = (
@@ -301,7 +311,7 @@ export const make = Effect.fnUntraced(
               )
             )
           ),
-          withRedactedHeaders
+          withRedactedHeaders(options.apiKeyHeader)
         )
       })
 
@@ -322,7 +332,7 @@ export const make = Effect.fnUntraced(
             })
           )
         ),
-        withRedactedHeaders
+        withRedactedHeaders(options.apiKeyHeader)
       )
 
     return OpenAiClient.of({
@@ -332,7 +342,7 @@ export const make = Effect.fnUntraced(
       createEmbedding
     })
   },
-  withRedactedHeaders
+  withRedactedHeaders()
 )
 
 // =============================================================================
@@ -383,6 +393,11 @@ export const layerConfig = (options?: {
   readonly apiKey?: Config.Config<Redacted.Redacted<string> | undefined> | undefined
 
   /**
+   * The config value to load for a raw API key header name.
+   */
+  readonly apiKeyHeader?: Config.Config<string | undefined> | undefined
+
+  /**
    * The config value to load for the API URL.
    */
   readonly apiUrl?: Config.Config<string> | undefined
@@ -408,6 +423,9 @@ export const layerConfig = (options?: {
       const apiKey = Predicate.isNotUndefined(options?.apiKey)
         ? yield* options.apiKey :
         undefined
+      const apiKeyHeader = Predicate.isNotUndefined(options?.apiKeyHeader)
+        ? yield* options.apiKeyHeader :
+        undefined
       const apiUrl = Predicate.isNotUndefined(options?.apiUrl)
         ? yield* options.apiUrl :
         undefined
@@ -419,6 +437,7 @@ export const layerConfig = (options?: {
         undefined
       return yield* make({
         apiKey,
+        apiKeyHeader,
         apiUrl,
         organizationId,
         projectId,

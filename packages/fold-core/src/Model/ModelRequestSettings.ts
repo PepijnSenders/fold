@@ -15,11 +15,13 @@ import type {
 	ActiveModel,
 	AnthropicThinkingSetting,
 	CodexReasoningSetting,
+	OpenAiReasoningEffort,
 	OpenAiReasoningSetting,
+	OpenAiReasoningSummary,
 	ReasoningLevel,
 } from '../EventLog/Schemas'
+import { OpenAiReasoningDisabled, OpenAiReasoningWithEffort } from '../EventLog/Schemas'
 
-const OpenAiReasoning = Data.taggedEnum<OpenAiReasoningSetting>()
 const CodexReasoning = Data.taggedEnum<CodexReasoningSetting>()
 const AnthropicThinking = Data.taggedEnum<AnthropicThinkingSetting>()
 
@@ -36,8 +38,17 @@ type OpenAiConfigBuilder = Mutable<Parameters<typeof OpenAiLanguageModel.withCon
  * `max` (gpt-5.6 family), and levels a model does not support are rejected per-model by catalog
  * validation at config time (D23/D25). Direct-SDK callers bypass that validation and own the 400 risk.
  */
-export const resolveOpenAiReasoning = (level: ReasoningLevel): OpenAiReasoningSetting =>
-	level === 'off' ? OpenAiReasoning.disabled() : OpenAiReasoning.effort({ effort: level })
+export const resolveOpenAiReasoning = (
+	level: ReasoningLevel,
+	summary?: OpenAiReasoningSummary,
+): OpenAiReasoningSetting =>
+	level === 'off'
+		? summary === undefined
+			? OpenAiReasoningDisabled.make({})
+			: OpenAiReasoningDisabled.make({ summary })
+		: summary === undefined
+			? OpenAiReasoningWithEffort.make({ effort: level })
+			: OpenAiReasoningWithEffort.make({ effort: level, summary })
 
 /**
  * Map one reasoning level onto codex reasoning; codex always requests auto summaries (D23). Same
@@ -155,11 +166,21 @@ export const liveModelRequestSettingsLayer: Layer.Layer<ModelRequestSettings> = 
 
 		switch (model.providerKind) {
 			case 'openai-compatible': {
+				const summary = Match.valueTags(model.reasoning, {
+					disabled: ({ summary }) => summary,
+					effort: ({ summary }) => summary,
+				})
 				const setting =
-					level === model.requestedReasoningLevel ? model.reasoning : resolveOpenAiReasoning(level)
+					level === model.requestedReasoningLevel ? model.reasoning : resolveOpenAiReasoning(level, summary)
 				const reasoning = Match.valueTags(setting, {
 					disabled: () => ({}),
-					effort: ({ effort }) => ({ reasoning: { effort } }),
+					effort: ({ effort, summary }) => {
+						const reasoning: { effort: OpenAiReasoningEffort; summary?: OpenAiReasoningSummary } = {
+							effort,
+						}
+						if (summary !== undefined) reasoning.summary = summary
+						return { reasoning }
+					},
 				})
 
 				const config: OpenAiConfigBuilder = {
