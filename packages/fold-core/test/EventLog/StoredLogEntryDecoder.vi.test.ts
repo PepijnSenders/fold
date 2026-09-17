@@ -76,6 +76,40 @@ it.effect('upcasts entries written before per-entry versioning to v1', () =>
 	}),
 )
 
+it.effect('decodes existing OpenAI agent entries without reasoning summary configuration', () =>
+	Effect.gen(function* () {
+		const entry = yield* decodeStoredLogEntry({
+			_tag: 'agent_started',
+			version: CURRENT_LOG_ENTRY_VERSION,
+			seq: 1,
+			eventId: EventId.create(),
+			ts: 2,
+			agentId: AgentId.create(),
+			parentAgentId: null,
+			toolCallId: null,
+			mode: 'fresh',
+			model: {
+				providerId: 'openai',
+				providerKind: 'openai-compatible',
+				modelId: 'gpt-5.5',
+				role: null,
+				requestedReasoningLevel: 'medium',
+				reasoning: { _tag: 'effort', effort: 'medium' },
+			},
+			tools: [],
+			skill: null,
+			fork: null,
+			agentType: null,
+		})
+
+		expect(entry._tag).toBe('agent_started')
+		if (entry._tag !== 'agent_started') return
+		expect(entry.model.providerKind).toBe('openai-compatible')
+		if (entry.model.providerKind !== 'openai-compatible') return
+		expect(entry.model.reasoningSummary).toBeUndefined()
+	}),
+)
+
 it.effect('rejects an unsupported event format without guessing its schema', () =>
 	Effect.gen(function* () {
 		const error = yield* decodeStoredLogEntry(sessionStartedEntry(2)).pipe(Effect.flip)
