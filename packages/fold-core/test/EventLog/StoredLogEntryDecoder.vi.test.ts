@@ -103,7 +103,7 @@ it.effect('decodes existing OpenAI agent entries without reasoning summary confi
 		})
 
 		expect(entry._tag).toBe('agent_started')
-		if (entry._tag !== 'agent_started') return
+		if (!Predicate.isTagged(entry, 'agent_started')) return
 		expect(entry.model.providerKind).toBe('openai-compatible')
 		if (entry.model.providerKind !== 'openai-compatible') return
 		expect(entry.model.reasoningSummary).toBeUndefined()
