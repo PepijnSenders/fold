@@ -18,8 +18,8 @@ import type {
 	OpenAiReasoningSetting,
 	ReasoningLevel,
 } from '../EventLog/Schemas'
+import { OpenAiReasoningDisabled, OpenAiReasoningWithEffort } from '../EventLog/Schemas'
 
-const OpenAiReasoning = Data.taggedEnum<OpenAiReasoningSetting>()
 const CodexReasoning = Data.taggedEnum<CodexReasoningSetting>()
 const AnthropicThinking = Data.taggedEnum<AnthropicThinkingSetting>()
 
@@ -36,8 +36,10 @@ type OpenAiConfigBuilder = Mutable<Parameters<typeof OpenAiLanguageModel.withCon
  * `max` (gpt-5.6 family), and levels a model does not support are rejected per-model by catalog
  * validation at config time (D23/D25). Direct-SDK callers bypass that validation and own the 400 risk.
  */
-export const resolveOpenAiReasoning = (level: ReasoningLevel): OpenAiReasoningSetting =>
-	level === 'off' ? OpenAiReasoning.disabled() : OpenAiReasoning.effort({ effort: level })
+export const resolveOpenAiReasoning = (level: ReasoningLevel): OpenAiReasoningSetting => {
+	if (level === 'off') return OpenAiReasoningDisabled.make({})
+	return OpenAiReasoningWithEffort.make({ effort: level })
+}
 
 /**
  * Map one reasoning level onto codex reasoning; codex always requests auto summaries (D23). Same
@@ -155,11 +157,16 @@ export const liveModelRequestSettingsLayer: Layer.Layer<ModelRequestSettings> = 
 
 		switch (model.providerKind) {
 			case 'openai-compatible': {
-				const setting =
-					level === model.requestedReasoningLevel ? model.reasoning : resolveOpenAiReasoning(level)
+				let setting = model.reasoning
+				if (level !== model.requestedReasoningLevel) {
+					setting = resolveOpenAiReasoning(level)
+				}
 				const reasoning = Match.valueTags(setting, {
 					disabled: () => ({}),
-					effort: ({ effort }) => ({ reasoning: { effort } }),
+					effort: ({ effort }) => {
+						if (model.reasoningSummary === undefined) return { reasoning: { effort } }
+						return { reasoning: { effort, summary: model.reasoningSummary } }
+					},
 				})
 
 				const config: OpenAiConfigBuilder = {

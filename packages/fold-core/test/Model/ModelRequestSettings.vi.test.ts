@@ -12,6 +12,8 @@ import {
 	resolveOpenAiReasoning,
 	supportsAdaptiveThinking,
 	type ActiveModel,
+	OpenAiReasoningDisabled,
+	OpenAiReasoningWithEffort,
 	type WrapModelRequestInput,
 } from '../../src/index'
 
@@ -31,6 +33,26 @@ const openAiOffModel: ActiveModel = {
 	role: null,
 	requestedReasoningLevel: 'off',
 	reasoning: { _tag: 'disabled' },
+}
+
+const openAiSummaryModel: ActiveModel = {
+	providerId: 'azure',
+	providerKind: 'openai-compatible',
+	modelId: 'gpt-5.6-sol',
+	role: null,
+	requestedReasoningLevel: 'medium',
+	reasoning: OpenAiReasoningWithEffort.make({ effort: 'medium' }),
+	reasoningSummary: 'auto',
+}
+
+const openAiDisabledSummaryModel: ActiveModel = {
+	providerId: 'azure',
+	providerKind: 'openai-compatible',
+	modelId: 'gpt-5.6-sol',
+	role: null,
+	requestedReasoningLevel: 'off',
+	reasoning: OpenAiReasoningDisabled.make({}),
+	reasoningSummary: 'auto',
 }
 
 const codexModel: ActiveModel = {
@@ -142,6 +164,33 @@ it.effect('re-derives the setting from the projected level after a thinking-chan
 		const configs = yield* observedConfigs({ model: openAiMediumModel, reasoningLevel: 'high' })
 
 		expect(configs.openai?.reasoning).toEqual({ effort: 'high' })
+	}),
+)
+
+it.effect('includes a configured summary and preserves it when the reasoning level changes', () =>
+	Effect.gen(function* () {
+		const initial = yield* observedConfigs({ model: openAiSummaryModel, reasoningLevel: 'medium' })
+		const changed = yield* observedConfigs({ model: openAiSummaryModel, reasoningLevel: 'high' })
+
+		expect(initial.openai).toEqual({
+			model: 'gpt-5.6-sol',
+			reasoning: { effort: 'medium', summary: 'auto' },
+		})
+		expect(changed.openai).toEqual({
+			model: 'gpt-5.6-sol',
+			reasoning: { effort: 'high', summary: 'auto' },
+		})
+	}),
+)
+
+it.effect('preserves a configured summary when reasoning is enabled after starting off', () =>
+	Effect.gen(function* () {
+		const configs = yield* observedConfigs({ model: openAiDisabledSummaryModel, reasoningLevel: 'medium' })
+
+		expect(configs.openai).toEqual({
+			model: 'gpt-5.6-sol',
+			reasoning: { effort: 'medium', summary: 'auto' },
+		})
 	}),
 )
 

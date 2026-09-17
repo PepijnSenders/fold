@@ -104,6 +104,9 @@ export const languageModelLayerFor = (model: FoldModel): Layer.Layer<LanguageMod
 	return Match.valueTags(provider, {
 		'openai-compatible': (connection) => {
 			const clientOptions: Mutable<Parameters<typeof OpenAiClient.layer>[0]> = { apiKey: connection.apiKey }
+			if (connection.apiKeyHeader !== null) {
+				clientOptions.apiKeyHeader = connection.apiKeyHeader
+			}
 			if (connection.baseUrl !== null) {
 				clientOptions.apiUrl = connection.baseUrl
 			}

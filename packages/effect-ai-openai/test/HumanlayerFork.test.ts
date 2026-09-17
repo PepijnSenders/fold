@@ -1,6 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
 import { OpenAiClient, OpenAiLanguageModel, OpenAiSchema } from '@humanlayer/effect-ai-openai'
-import { Effect, Layer, Predicate, Redacted, Schema } from 'effect'
+import { Config, Effect, Layer, Predicate, Redacted, Schema } from 'effect'
 import { LanguageModel, Prompt } from 'effect/unstable/ai'
 import { FetchHttpClient } from 'effect/unstable/http'
 
@@ -33,6 +33,24 @@ const makeCapturingFetch = (requests: Array<string>): typeof fetch =>
 		async (input: string | URL | Request, init?: RequestInit) => {
 			const request = isWebRequest(input) ? input : new Request(String(input), init)
 			requests.push(await request.clone().text())
+			return new Response(JSON.stringify(OpenAiResponse), { status: 200 })
+		},
+		{ preconnect: fetch.preconnect },
+	)
+
+type CapturedAuthentication = {
+	readonly authorization: string | null
+	readonly apiKey: string | null
+}
+
+const makeAuthenticationCapturingFetch = (requests: Array<CapturedAuthentication>): typeof fetch =>
+	Object.assign(
+		async (input: string | URL | Request, init?: RequestInit) => {
+			const request = isWebRequest(input) ? input : new Request(String(input), init)
+			requests.push({
+				authorization: request.headers.get('authorization'),
+				apiKey: request.headers.get('api-key'),
+			})
 			return new Response(JSON.stringify(OpenAiResponse), { status: 200 })
 		},
 		{ preconnect: fetch.preconnect },
@@ -129,6 +147,50 @@ describe('@humanlayer/effect-ai-openai', () => {
 			assert.strictEqual(objectOutput['output'], JSON.stringify({ answer: 42 }))
 		}),
 	)
+
+	it.live('uses a raw API key header instead of bearer authentication when configured', () => {
+		const requests: Array<CapturedAuthentication> = []
+		const httpLayer = FetchHttpClient.layer.pipe(
+			Layer.provide(Layer.succeed(FetchHttpClient.Fetch, makeAuthenticationCapturingFetch(requests))),
+		)
+		const modelLayer = OpenAiLanguageModel.model('gpt-test').pipe(
+			Layer.provide(
+				OpenAiClient.layer({
+					apiKey: Redacted.make('azure-secret'),
+					apiKeyHeader: 'api-key',
+				}).pipe(Layer.provide(httpLayer)),
+			),
+		)
+		const prompt = Prompt.fromMessages([Prompt.userMessage({ content: [Prompt.textPart({ text: 'hello' })] })])
+
+		return Effect.gen(function* () {
+			yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(modelLayer))
+
+			assert.deepStrictEqual(requests, [{ authorization: null, apiKey: 'azure-secret' }])
+		})
+	})
+
+	it.live('loads a raw API key header through layerConfig', () => {
+		const requests: Array<CapturedAuthentication> = []
+		const httpLayer = FetchHttpClient.layer.pipe(
+			Layer.provide(Layer.succeed(FetchHttpClient.Fetch, makeAuthenticationCapturingFetch(requests))),
+		)
+		const modelLayer = OpenAiLanguageModel.model('gpt-test').pipe(
+			Layer.provide(
+				OpenAiClient.layerConfig({
+					apiKey: Config.succeed(Redacted.make('azure-secret')),
+					apiKeyHeader: Config.succeed('api-key'),
+				}).pipe(Layer.provide(httpLayer)),
+			),
+		)
+		const prompt = Prompt.fromMessages([Prompt.userMessage({ content: [Prompt.textPart({ text: 'hello' })] })])
+
+		return Effect.gen(function* () {
+			yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(modelLayer))
+
+			assert.deepStrictEqual(requests, [{ authorization: null, apiKey: 'azure-secret' }])
+		})
+	})
 
 	it('accepts incomplete flat and nested error events', () => {
 		const flat = Schema.decodeUnknownSync(OpenAiSchema.ResponseStreamEvent)({
