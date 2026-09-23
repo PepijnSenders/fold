@@ -46,6 +46,15 @@ const xaiGrok: ActiveModel = {
 	reasoning: { _tag: 'effort', effort: 'xhigh' },
 }
 
+const codexModel = (modelId: string): ActiveModel => ({
+	providerId: 'codex',
+	providerKind: 'codex',
+	modelId,
+	role: null,
+	requestedReasoningLevel: 'max',
+	reasoning: { _tag: 'effort', effort: 'max', summary: 'auto' },
+})
+
 it('resolves a codex-kind gpt-5.6-sol to the baked openai entry', () => {
 	const entry = lookupCatalogEntry(bakedModelCatalog, codexSol)
 
@@ -69,6 +78,30 @@ it('resolves a codex-kind gpt-6-astra to the baked OpenAI entry', () => {
 	expect(entry?.pricing?.inputPerMTokens).toBe(10)
 	expect(entry?.pricing?.outputPerMTokens).toBe(50)
 	expect(entry?.reasoningEfforts).toContain('max')
+})
+
+it('ships the GPT-6 Sol and Luna public limits, efforts, pricing, and Codex provider lookup', () => {
+	const expectations = [
+		{ modelId: 'gpt-6-sol', inputPrice: 2, outputPrice: 10 },
+		{ modelId: 'gpt-6-luna', inputPrice: 0.1, outputPrice: 0.5 },
+	] as const
+
+	for (const expected of expectations) {
+		const entry = lookupCatalogEntry(bakedModelCatalog, codexModel(expected.modelId))
+
+		expect(entry).not.toBeNull()
+		expect(entry).toMatchObject({
+			providerId: 'openai',
+			modelId: expected.modelId,
+			contextWindow: 1_050_000,
+			maxInputTokens: 922_000,
+			maxOutputTokens: 128_000,
+			reasoning: true,
+			reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+		})
+		expect(entry?.pricing?.inputPerMTokens).toBe(expected.inputPrice)
+		expect(entry?.pricing?.outputPerMTokens).toBe(expected.outputPrice)
+	}
 })
 
 it('resolves an openai-compatible gpt-5.6-terra to the baked openai entry', () => {
