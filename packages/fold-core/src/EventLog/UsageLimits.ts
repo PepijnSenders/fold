@@ -18,11 +18,7 @@ export const UsageLimitResetsAt = Schema.Finite.check(Schema.isGreaterThanOrEqua
 })
 export type UsageLimitResetsAt = typeof UsageLimitResetsAt.Type
 
-/**
- * One usage-limit window. The window's position is the map key in {@link UsageLimits.windows}; its
- * duration is carried by `windowMinutes`, because a provider's window positions are not fixed
- * durations. Every field is optional so a reader tolerates a provider that reports only a subset.
- */
+/** One usage-limit window; read its duration from `windowMinutes`, not the map key, since window positions are not fixed durations. */
 export const UsageLimitWindow = Schema.Struct({
 	usedPercent: Schema.optional(UsageLimitPercent),
 	windowMinutes: Schema.optional(UsageLimitWindowMinutes),
@@ -38,13 +34,7 @@ export const UsageLimitCredits = Schema.Struct({
 }).annotate({ identifier: 'UsageLimitCredits' })
 export type UsageLimitCredits = typeof UsageLimitCredits.Type
 
-/**
- * Durable, provider-neutral subscription usage-limit snapshot. Deliberately fold-owned and fully
- * best-effort like {@link UsageEncoded}: every provider reports a different subset, so each field is
- * optional and a reader must tolerate an empty snapshot. Windows are keyed by a provider-neutral id
- * (for example `primary`/`secondary`) so a consumer reads a window's duration from `windowMinutes`
- * rather than inferring it from the key.
- */
+/** Durable, provider-neutral usage-limit snapshot. Best-effort like {@link UsageEncoded}: every field is optional and a reader tolerates an empty snapshot. */
 export const UsageLimits = Schema.Struct({
 	limitId: Schema.optional(Schema.String),
 	limitName: Schema.optional(Schema.String),
